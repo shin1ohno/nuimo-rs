@@ -102,25 +102,25 @@ async fn main() -> anyhow::Result<()> {
 }
 
 async fn handle_nuimo_event(client: &AsyncClient, device_id: &str, event: &NuimoEvent) {
-    let (subject, parameter) = match event {
-        NuimoEvent::ButtonDown => ("selectDown", serde_json::json!(1)),
-        NuimoEvent::ButtonUp => ("selectUp", serde_json::json!(0)),
-        NuimoEvent::Rotate { delta, .. } => ("rotate", serde_json::json!(delta)),
-        NuimoEvent::SwipeUp => ("swipeUp", serde_json::json!(null)),
-        NuimoEvent::SwipeDown => ("swipeDown", serde_json::json!(null)),
-        NuimoEvent::SwipeLeft => ("swipeLeft", serde_json::json!(null)),
-        NuimoEvent::SwipeRight => ("swipeRight", serde_json::json!(null)),
-        NuimoEvent::TouchTop => ("touchTop", serde_json::json!(null)),
-        NuimoEvent::TouchBottom => ("touchBottom", serde_json::json!(null)),
-        NuimoEvent::TouchLeft => ("touchLeft", serde_json::json!(null)),
-        NuimoEvent::TouchRight => ("touchRight", serde_json::json!(null)),
-        NuimoEvent::LongTouchLeft => ("longTouchLeft", serde_json::json!(null)),
-        NuimoEvent::LongTouchRight => ("longTouchRight", serde_json::json!(null)),
-        NuimoEvent::LongTouchBottom => ("longTouchBottom", serde_json::json!(null)),
-        NuimoEvent::LongTouchTop => ("longTouchTop", serde_json::json!(null)),
-        NuimoEvent::Hover { proximity } => ("hover", serde_json::json!(proximity)),
-        NuimoEvent::FlyLeft => ("swipeLeft", serde_json::json!({"hoverSwipe": true})),
-        NuimoEvent::FlyRight => ("swipeRight", serde_json::json!({"hoverSwipe": true})),
+    let (primitive, payload) = match event {
+        NuimoEvent::ButtonDown => ("press", serde_json::json!({})),
+        NuimoEvent::ButtonUp => ("release", serde_json::json!({})),
+        NuimoEvent::Rotate { delta, .. } => ("rotate", serde_json::json!({"delta": delta})),
+        NuimoEvent::SwipeUp => ("swipe_up", serde_json::json!({})),
+        NuimoEvent::SwipeDown => ("swipe_down", serde_json::json!({})),
+        NuimoEvent::SwipeLeft => ("swipe_left", serde_json::json!({})),
+        NuimoEvent::SwipeRight => ("swipe_right", serde_json::json!({})),
+        NuimoEvent::TouchTop => ("touch_top", serde_json::json!({})),
+        NuimoEvent::TouchBottom => ("touch_bottom", serde_json::json!({})),
+        NuimoEvent::TouchLeft => ("touch_left", serde_json::json!({})),
+        NuimoEvent::TouchRight => ("touch_right", serde_json::json!({})),
+        NuimoEvent::LongTouchLeft => ("long_touch_left", serde_json::json!({})),
+        NuimoEvent::LongTouchRight => ("long_touch_right", serde_json::json!({})),
+        NuimoEvent::LongTouchBottom => ("long_touch_bottom", serde_json::json!({})),
+        NuimoEvent::LongTouchTop => ("long_touch_top", serde_json::json!({})),
+        NuimoEvent::Hover { proximity } => ("hover", serde_json::json!({"proximity": proximity})),
+        NuimoEvent::FlyLeft => ("swipe_left", serde_json::json!({})),
+        NuimoEvent::FlyRight => ("swipe_right", serde_json::json!({})),
         NuimoEvent::BatteryLevel(level) => {
             let _ = mqtt::publish_battery(client, device_id, *level).await;
             return;
@@ -132,7 +132,7 @@ async fn handle_nuimo_event(client: &AsyncClient, device_id: &str, event: &Nuimo
         NuimoEvent::Connected | NuimoEvent::Disconnected => return,
     };
 
-    if let Err(e) = mqtt::publish_operation(client, device_id, subject, &parameter).await {
+    if let Err(e) = mqtt::publish_input(client, device_id, primitive, &payload).await {
         tracing::warn!("MQTT publish error: {}", e);
     }
 }

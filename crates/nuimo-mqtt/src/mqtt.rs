@@ -3,6 +3,9 @@ use tokio::sync::mpsc;
 
 use crate::config::Config;
 
+/// MQTT bridge for Nuimo, using weave-compatible topic structure:
+///   Publish: device/nuimo/{id}/input/{primitive}
+///   Subscribe: device/nuimo/{id}/feedback/{type}
 pub struct MqttBridge {
     client: AsyncClient,
     event_loop: EventLoop,
@@ -13,7 +16,6 @@ pub struct MqttBridge {
 impl MqttBridge {
     pub fn new(config: &Config) -> Self {
         let url = &config.broker_url;
-        // Parse host:port from mqtt://host:port
         let stripped = url
             .strip_prefix("mqtt://")
             .or_else(|| url.strip_prefix("tcp://"))
@@ -44,9 +46,10 @@ impl MqttBridge {
         mut self,
         device_id: &str,
     ) -> anyhow::Result<(AsyncClient, mpsc::Receiver<(String, String)>)> {
-        let reaction_topic = format!("nuimo/{}/reaction", device_id);
+        // Subscribe to feedback from weave router
+        let feedback_topic = format!("device/nuimo/{}/feedback/#", device_id);
         self.client
-            .subscribe(&reaction_topic, QoS::AtLeastOnce)
+            .subscribe(&feedback_topic, QoS::AtLeastOnce)
             .await?;
 
         let command_tx = self.command_tx.clone();
@@ -74,53 +77,54 @@ impl MqttBridge {
     }
 }
 
-pub async fn publish_operation(
+/// Publish an input primitive to device/nuimo/{id}/input/{primitive_name}.
+pub async fn publish_input(
     client: &AsyncClient,
     device_id: &str,
-    subject: &str,
-    parameter: &serde_json::Value,
+    primitive_name: &str,
+    payload: &serde_json::Value,
 ) -> anyhow::Result<()> {
-    let topic = format!("nuimo/{}/operation", device_id);
-    let payload = serde_json::json!({
-        "subject": subject,
-        "parameter": parameter,
-    });
+    let topic = format!("device/nuimo/{}/input/{}", device_id, primitive_name);
     client
-        .publish(&topic, QoS::AtLeastOnce, false, serde_json::to_string(&payload)?)
+        .publish(&topic, QoS::AtMostOnce, false, serde_json::to_string(payload)?)
         .await?;
     Ok(())
 }
 
+/// Publish battery level as device state.
+pub async fn publish_battery(
+    client: &AsyncClient,
+    device_id: &str,
+    level: u8,
+) -> anyhow::Result<()> {
+    let topic = format!("device/nuimo/{}/state/battery", device_id);
+    client
+        .publish(&topic, QoS::AtLeastOnce, true, level.to_string())
+        .await?;
+    Ok(())
+}
+
+/// Publish RSSI as device state.
 pub async fn publish_rssi(
     client: &AsyncClient,
     device_id: &str,
     rssi: i16,
 ) -> anyhow::Result<()> {
-    let topic = format!("nuimo/{}/rssi", device_id);
+    let topic = format!("device/nuimo/{}/state/rssi", device_id);
     client
         .publish(&topic, QoS::AtLeastOnce, false, rssi.to_string())
         .await?;
     Ok(())
 }
 
-pub async fn publish_battery(
-    client: &AsyncClient,
-    device_id: &str,
-    level: u8,
-) -> anyhow::Result<()> {
-    let topic = format!("nuimo/{}/batteryLevel", device_id);
-    client
-        .publish(&topic, QoS::AtLeastOnce, false, level.to_string())
-        .await?;
-    Ok(())
-}
-
+/// Publish device connected event.
 pub async fn publish_connected(
     client: &AsyncClient,
     device_id: &str,
 ) -> anyhow::Result<()> {
+    let topic = format!("device/nuimo/{}/state/connected", device_id);
     client
-        .publish("nuimo/connected", QoS::AtLeastOnce, false, device_id)
+        .publish(&topic, QoS::AtLeastOnce, true, "true")
         .await?;
     Ok(())
 }
