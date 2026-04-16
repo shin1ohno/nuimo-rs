@@ -66,17 +66,17 @@ device/{type}/{id}/input/{primitive}
 
 **ルーター → サービス (意図)**:
 ```
-service/{type}/{target}/command/{intent}
-  例: service/roon/living-zone/command/volume_change  payload: {"delta": 3}
-      service/roon/living-zone/command/play            payload: {}
-      service/hue/living-room/command/brightness       payload: {"delta": 10}
+service/{type}/{target_id}/command/{intent}
+  例: service/roon/16017ec9318.../command/volume_change  payload: {"delta": 3}
+      service/roon/16017ec9318.../command/play            payload: {}
+      service/hue/group-1/command/brightness               payload: {"delta": 10}
 ```
 
 **サービス → ルーター → デバイス (フィードバック)**:
 ```
-service/{type}/{target}/state/{property}
-  例: service/roon/living-zone/state/playback    payload: "playing"
-      service/roon/living-zone/state/volume      payload: 50
+service/{type}/{target_id}/state/{property}
+  例: service/roon/16017ec9318.../state/playback    payload: "playing"
+      service/roon/16017ec9318.../state/volume      payload: 50
 
 device/{type}/{id}/feedback/{type}
   例: device/nuimo/c381df4e/feedback/glyph       payload: {"glyph": "play", "brightness": 1.0}
@@ -88,9 +88,9 @@ device/{type}/{id}/feedback/{type}
 {
   "mapping_id": "uuid",
   "device_type": "nuimo",
-  "device_id": "c381df4e",
+  "device_id": "C3:81:DF:4E:FF:6A",
   "service_type": "roon",
-  "service_target": "living-zone",
+  "service_target": "16017ec93184841af2731e71ce1454ed0316",
   "routes": [
     {"input": "rotate", "intent": "volume_change", "params": {"damping": 80}},
     {"input": "press", "intent": "playpause"},
@@ -104,6 +104,8 @@ device/{type}/{id}/feedback/{type}
   "active": true
 }
 ```
+
+`device_id` と `service_target` はそれぞれのシステムが発行する固有 ID をそのまま使用する（Nuimo = BLE address、Roon = zone_id/output_id、Hue = group ID 等）。Web UI ではこれらに human-readable な display_name を併記する。
 
 ### 実装構成
 
