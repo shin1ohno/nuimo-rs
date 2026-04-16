@@ -7,5 +7,6 @@ edition = "2021"
 bluer = { version = "0.17", features = ["full"] }
 thiserror = { workspace = true }
 tokio = { workspace = true }
+tokio-stream = "0.1"
 tracing = { workspace = true }
 uuid = { version = "1", features = ["v4"] }

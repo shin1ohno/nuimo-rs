@@ -517,6 +517,7 @@ dependencies = [
  "bluer",
  "thiserror 2.0.18",
  "tokio",
+ "tokio-stream",
  "tracing",
  "uuid",
 ]
