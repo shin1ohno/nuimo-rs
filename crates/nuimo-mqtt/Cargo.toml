@@ -1,0 +1,14 @@
+[package]
+name = "nuimo-mqtt"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1"
+nuimo = { path = "../nuimo" }
+rumqttc = "0.24"
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }

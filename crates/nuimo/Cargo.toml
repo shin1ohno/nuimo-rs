@@ -1,0 +1,11 @@
+[package]
+name = "nuimo"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bluer = { version = "0.17", features = ["full"] }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+uuid = { version = "1", features = ["v4"] }
