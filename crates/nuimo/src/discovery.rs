@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::time::Duration;
 
 use bluer::{Adapter, AdapterEvent, Address, Device};
 use tokio::sync::mpsc;
@@ -37,8 +37,35 @@ pub async fn discover(
     let adapter_name = adapter.name().to_string();
 
     let handle = tokio::spawn(async move {
-        if let Err(e) = scan_loop(adapter, tx, &adapter_name).await {
-            tracing::warn!("Discovery ended: {}", e);
+        // Keep _session alive so the adapter's D-Bus connection persists
+        let _session = session;
+
+        // Periodically check BlueZ-cached devices (handles devices that were
+        // already known before scanning started, or that reappear after failures)
+        let cache_adapter = adapter.clone();
+        let cache_tx = tx.clone();
+        let cache_adapter_name = adapter_name.clone();
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(Duration::from_secs(5)).await;
+                if let Ok(addrs) = cache_adapter.device_addresses().await {
+                    for addr in addrs {
+                        if let Ok(device) = cache_adapter.device(addr) {
+                            report_if_nuimo(&device, addr, &cache_adapter_name, &cache_tx).await;
+                        }
+                    }
+                }
+            }
+        });
+
+        // Run the live BLE scan stream with auto-restart
+        loop {
+            if let Err(e) = scan_loop(&adapter, &tx, &adapter_name).await {
+                tracing::warn!("Discovery scan ended: {}, restarting...", e);
+            } else {
+                tracing::info!("Discovery scan stream ended, restarting...");
+            }
+            tokio::time::sleep(Duration::from_secs(2)).await;
         }
     });
 
@@ -46,51 +73,60 @@ pub async fn discover(
 }
 
 async fn scan_loop(
-    adapter: Adapter,
-    tx: mpsc::Sender<DiscoveredNuimo>,
+    adapter: &Adapter,
+    tx: &mpsc::Sender<DiscoveredNuimo>,
     adapter_name: &str,
 ) -> Result<(), NuimoError> {
+    // Check devices already known to BlueZ (from previous scans / pairing)
+    if let Ok(addrs) = adapter.device_addresses().await {
+        for addr in addrs {
+            if let Ok(device) = adapter.device(addr) {
+                report_if_nuimo(&device, addr, adapter_name, tx).await;
+            }
+        }
+    }
+
     let discover = adapter
         .discover_devices()
         .await
         .map_err(|e| NuimoError::Ble(e.to_string()))?;
     tokio::pin!(discover);
 
-    let mut seen = HashSet::new();
-
     while let Some(event) = discover.next().await {
         if let AdapterEvent::DeviceAdded(addr) = event {
-            if seen.contains(&addr) {
-                continue;
-            }
-
             let device = match adapter.device(addr) {
                 Ok(d) => d,
                 Err(_) => continue,
             };
-
-            if is_nuimo(&device).await {
-                seen.insert(addr);
-                let name = device
-                    .name()
-                    .await
-                    .ok()
-                    .flatten()
-                    .unwrap_or_else(|| DEVICE_NAME.to_string());
-                let discovered = DiscoveredNuimo {
-                    address: addr,
-                    name,
-                    adapter: adapter_name.to_string(),
-                };
-                tracing::info!("Discovered Nuimo: {} ({})", discovered.name, addr);
-                if tx.send(discovered).await.is_err() {
-                    break;
-                }
-            }
+            report_if_nuimo(&device, addr, adapter_name, tx).await;
         }
     }
 
     Ok(())
+}
+
+async fn report_if_nuimo(
+    device: &Device,
+    addr: Address,
+    adapter_name: &str,
+    tx: &mpsc::Sender<DiscoveredNuimo>,
+) {
+    if !is_nuimo(device).await {
+        return;
+    }
+    let name = device
+        .name()
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| DEVICE_NAME.to_string());
+    let discovered = DiscoveredNuimo {
+        address: addr,
+        name,
+        adapter: adapter_name.to_string(),
+    };
+    tracing::info!("Discovered Nuimo: {} ({})", discovered.name, addr);
+    let _ = tx.send(discovered).await;
 }
 
 async fn is_nuimo(device: &Device) -> bool {

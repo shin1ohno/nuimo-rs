@@ -75,7 +75,7 @@ impl NuimoDevice {
             .map_err(|e| NuimoError::Ble(e.to_string()))?;
 
         let (raw_tx, mut raw_rx) = mpsc::channel::<NuimoEvent>(64);
-        let periph = NuimoPeripheral::connect(&adapter, self.address, raw_tx).await?;
+        let periph = NuimoPeripheral::connect(session, &adapter, self.address, raw_tx).await?;
         *self.peripheral.lock().await = Some(periph);
 
         // Forward raw events with rotation processing
@@ -120,9 +120,9 @@ impl NuimoDevice {
                     }
                     other => other,
                 };
-                if event_tx.send(processed).is_err() {
-                    break;
-                }
+                // Ignore send errors — no active subscribers is normal
+                // (e.g., events() not yet called). The task must stay alive.
+                let _ = event_tx.send(processed);
             }
         });
 
@@ -214,5 +214,17 @@ impl NuimoDevice {
     /// Current rotation value (Clamped mode only).
     pub async fn rotation(&self) -> f64 {
         self.rotation_state.lock().await.value
+    }
+}
+
+impl Drop for NuimoDevice {
+    fn drop(&mut self) {
+        let peripheral = self.peripheral.clone();
+        tokio::spawn(async move {
+            let mut guard = peripheral.lock().await;
+            if let Some(periph) = guard.take() {
+                let _ = periph.disconnect().await;
+            }
+        });
     }
 }

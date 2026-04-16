@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use bluer::gatt::remote::Characteristic;
-use bluer::{Adapter, Address, Device};
+use bluer::{Adapter, Address, Device, DeviceEvent, DeviceProperty};
 use tokio::sync::mpsc;
 use tokio_stream::StreamExt;
 
@@ -11,6 +11,8 @@ use crate::gatt;
 
 /// Low-level BLE communication with a Nuimo device.
 pub(crate) struct NuimoPeripheral {
+    // Keep the session alive so D-Bus notifications continue working.
+    _session: bluer::Session,
     device: Device,
     led_char: Option<Characteristic>,
     event_tx: mpsc::Sender<NuimoEvent>,
@@ -18,6 +20,7 @@ pub(crate) struct NuimoPeripheral {
 
 impl NuimoPeripheral {
     pub async fn connect(
+        session: bluer::Session,
         adapter: &Adapter,
         address: Address,
         event_tx: mpsc::Sender<NuimoEvent>,
@@ -52,6 +55,7 @@ impl NuimoPeripheral {
 
         for service in services {
             let service_uuid = service.uuid().await.map_err(|e| NuimoError::Ble(e.to_string()))?;
+            tracing::debug!("Service: {}", service_uuid);
             let chars = service
                 .characteristics()
                 .await
@@ -59,6 +63,7 @@ impl NuimoPeripheral {
 
             for char in chars {
                 let uuid = char.uuid().await.map_err(|e| NuimoError::Ble(e.to_string()))?;
+                tracing::debug!("  Characteristic: {}", uuid);
                 match uuid {
                     u if u == gatt::LED_MATRIX => led_char = Some(char),
                     u if u == gatt::BATTERY_LEVEL => battery_char = Some(char),
@@ -68,9 +73,18 @@ impl NuimoPeripheral {
                     u if u == gatt::FLY => fly_char = Some(char),
                     _ => {}
                 }
-                let _ = service_uuid; // used for iteration
             }
         }
+
+        tracing::info!(
+            "Characteristics found: led={}, battery={}, button={}, rotation={}, touch={}, fly={}",
+            led_char.is_some(),
+            battery_char.is_some(),
+            button_char.is_some(),
+            rotation_char.is_some(),
+            touch_char.is_some(),
+            fly_char.is_some(),
+        );
 
         // Read battery level
         if let Some(ref ch) = battery_char {
@@ -83,6 +97,7 @@ impl NuimoPeripheral {
 
         // Subscribe to notify characteristics
         let periph = NuimoPeripheral {
+            _session: session,
             device,
             led_char,
             event_tx: event_tx.clone(),
@@ -144,6 +159,9 @@ impl NuimoPeripheral {
 
         let _ = event_tx.send(NuimoEvent::Connected).await;
 
+        // Monitor device connection state for disconnect detection
+        spawn_disconnect_monitor(&periph.device, event_tx);
+
         Ok(periph)
     }
 
@@ -187,19 +205,52 @@ fn spawn_notify_listener<F>(
     F: Fn(Vec<u8>) -> Option<NuimoEvent> + Send + 'static,
 {
     tokio::spawn(async move {
-        match char.notify().await {
-            Ok(stream) => {
-                tokio::pin!(stream);
-                while let Some(data) = stream.next().await {
-                    if let Some(event) = parser(data) {
-                        if tx.send(event).await.is_err() {
+        let uuid = char.uuid().await.unwrap_or_default();
+        tracing::info!("Subscribing to notifications (IO) for {}", uuid);
+        match char.notify_io().await {
+            Ok(reader) => {
+                tracing::info!("Notification IO established for {} (MTU={})", uuid, reader.mtu());
+                loop {
+                    match reader.recv().await {
+                        Ok(data) => {
+                            tracing::debug!("Notification data from {}: {:?}", uuid, data);
+                            if let Some(event) = parser(data) {
+                                if tx.send(event).await.is_err() {
+                                    tracing::warn!("Event channel closed for {}", uuid);
+                                    break;
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            tracing::warn!("Notification IO ended for {}: {}", uuid, e);
                             break;
                         }
                     }
                 }
             }
             Err(e) => {
-                tracing::warn!("Notify subscription failed: {}", e);
+                tracing::warn!("Notify IO subscription failed for {}: {}", uuid, e);
+            }
+        }
+    });
+}
+
+fn spawn_disconnect_monitor(device: &Device, tx: mpsc::Sender<NuimoEvent>) {
+    let device = device.clone();
+    tokio::spawn(async move {
+        let events = match device.events().await {
+            Ok(e) => e,
+            Err(e) => {
+                tracing::warn!("Failed to monitor device events: {}", e);
+                return;
+            }
+        };
+        tokio::pin!(events);
+        while let Some(event) = events.next().await {
+            if let DeviceEvent::PropertyChanged(DeviceProperty::Connected(false)) = event {
+                tracing::info!("Device disconnected (BLE property change)");
+                let _ = tx.send(NuimoEvent::Disconnected).await;
+                break;
             }
         }
     });
