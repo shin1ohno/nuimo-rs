@@ -1,141 +1,113 @@
-# nu-router: IoT Device ↔ Service Routing Engine
+# nuimo-rs: Nuimo BLE SDK + optional MQTT bridge
 
 ## Summary
 
-物理 IoT デバイス（Nuimo、StreamDeck、HueDial 等）の操作を、サービス（Roon、照明、エアコン等）のコマンドに変換するルーティングエンジン。デバイスは「操作プリミティブ」(rotate, press, swipe) を MQTT に publish し、ルーターが設定に基づいてサービスの「意図」(volume, play, brightness) に変換して MQTT に publish する。マッピングは MCP/API 経由で動的に変更可能。
+Senic Nuimo（BLE 物理コントローラー）用の Rust SDK と、その上に載る 2 つの消費側（別リポジトリ）の両方を支えるモジュール群:
+
+- **SDK (`crates/nuimo`)**: BLE で Nuimo に接続し、`NuimoEvent` の stream を購読・`Glyph` で LED を描画する。MQTT 依存なし。いずれの統合経路からも static link で使う
+- **MQTT bridge (`crates/nuimo-mqtt`)**: Nuimo の入出力を MQTT に橋渡しする参照実装。N:N クロスホスト運用時の device 側エンドポイント
+
+直結 edge-agent 経路（推奨）では、`nuimo` SDK を [`edge-agent`](https://github.com/shin1ohno/edge-agent) が静的リンクして直接 BLE を扱う。MQTT 経路を使う場合のみ `nuimo-mqtt` を動かす。
 
 ## Requirements
 
 ### Must
 
-1. **操作プリミティブ → 意図変換**: デバイスの物理操作 (rotate, press, long_press, swipe, slide, hover) をサービスの意図 (play, volume_change, next, brightness_up) にマッピング
-2. **設定駆動のマッピング**: マッピングは DB (DynamoDB) に保存。コード変更なしでマッピングを追加・変更可能
-3. **動的変更**: MCP tool または REST API でマッピングをランタイム変更可能（リスタート不要）
-4. **複数デバイス → 複数サービス**: N:M のマッピング。1台の Nuimo が Roon volume と照明 brightness を同時制御可能
-5. **Zone/Target 動的切替**: MCP/API 経由でデバイスのアクティブターゲット（Roon zone、照明グループ等）を切り替え
-6. **BLE 切断時のグレースフル動作**: デバイス切断をルーター側で検知し、再接続時にマッピングを自動復帰
-7. **低レイテンシ**: Nuimo rotate → volume 変更の体感遅延 < 100ms（MQTT 経由）
-
-8. **Web UI**: React/Next.js でマッピング設定・状態確認・ターゲット切替ができる画面。nu-router が REST API を提供し、フロントエンドは別プロセス
-9. **フィードバックループ**: サービスの状態変更 → デバイスの表示更新（Roon playing → Nuimo LED play icon）
-10. **dampingFactor / 感度設定**: rotate → volume の変換係数を設定可能
+1. **BLE 接続**: D-Bus 経由で bluez にアクセスし、Nuimo を discover + connect
+2. **全イベント提供**: Button / Rotate / Swipe / Touch / LongTouch / Fly / Hover / Battery / RSSI / Connected|Disconnected を `broadcast::Receiver<NuimoEvent>` で配信
+3. **9x9 Glyph 描画**: `Glyph::from_str("...9 行の ASCII...")` + `DisplayOptions { brightness, timeout_ms, transition }` で LED 表示
+4. **Rotation mode 切替**: `Continuous` / `Clamped { min, max }`
+5. **再接続安全**: D-Bus property 監視で切断検知、再接続で characteristic 再サブスクライブ
 
 ### Should
 
-11. **MCP tools**: Claude から `list_mappings`, `update_mapping`, `switch_target` を呼べる
-12. **プリセット**: よく使うマッピング（Nuimo+Roon、StreamDeck+照明）のテンプレート
+6. **複数 Nuimo 並存**: BLE アドレスで一意識別、1 プロセスから複数台を扱える
+7. **サンプル**: `crates/nuimo/examples/connect_test.rs` で最小接続 + イベント dump
 
 ### Could
 
-13. **条件付きルーティング**: 時間帯やモードによってマッピングを切り替え
-14. **マクロ**: 1操作で複数サービスに同時発行（rotate で volume + brightness を同時制御）
-15. **デバイス操作での zone 切替**: Nuimo の特定ジェスチャーで zone 切替（API に加えて）
+8. **Fly と Swipe の区別**: 現在は edge-agent / nuimo-mqtt 双方で `FlyLeft/Right` を `SwipeLeft/Right` に統合している。用途分離したくなったら個別に
 
 ## Non-requirements
 
-- デバイスの BLE 接続管理（nuimo-mqtt 等が担当）
-- サービスの直接制御（roon-hub 等が担当）
-- ユーザー認証・マルチテナント（シングルユーザー前提）
-- Settings サービス（Roon UI 内の設定画面）
+- ルーティング / マッピング（`edge-agent` または `weave-engine` が担当）
+- サービス接続（Roon / Hue 等は別 adapter）
+- MQTT 以外のプロトコル bridge（必要なら別 crate）
 
 ## Technical Approach
 
-### アーキテクチャ
+### 経路 A: 直結 edge-agent 経由（推奨）
 
 ```
-デバイス層                  ルーティング層                        サービス層
-─────────                  ──────────                          ─────────
-nuimo-mqtt ──┐             nu-router (Rust)                 ┌── roon-hub
-streamdeck ──├→ MQTT ──→  ├ MQTT routing engine          ──→ MQTT ──┤── hue-bridge
-huedial ─────┘             ├ REST API (axum)                └── aircon-ctrl
-                           ├ DB (DynamoDB)
-                           │
-                           nu-router-web (Next.js)
-                           └ Web UI for config & monitoring
+[edge-agent host]
+  edge-agent binary
+   ├ nuimo (path dep or git dep)   ← この crate
+   │   └ bluez / D-Bus
+   ├ routing engine
+   ├ adapter-roon                  → Roon Core (MOO RPC)
+   └ ws client                     → weave-server (/ws/edge)
 ```
 
-### MQTT トピック設計
+edge-agent が `nuimo::discover() → NuimoDevice::connect() → device.events()` をそのまま使い、ユーザー入力を `InputPrimitive` に変換して routing engine に投げる。フィードバック glyph は weave から受信した registry から名前参照で描画。
 
-**デバイス → ルーター (操作プリミティブ)**:
-```
-device/{type}/{id}/input/{primitive}
-  例: device/nuimo/c381df4e/input/rotate     payload: {"delta": 0.03}
-      device/nuimo/c381df4e/input/press      payload: {}
-      device/streamdeck/sd1/input/key_press  payload: {"key": 3}
-```
+### 経路 B: MQTT bridge
 
-**ルーター → サービス (意図)**:
 ```
-service/{type}/{target_id}/command/{intent}
-  例: service/roon/16017ec9318.../command/volume_change  payload: {"delta": 3}
-      service/roon/16017ec9318.../command/play            payload: {}
-      service/hue/group-1/command/brightness               payload: {"delta": 10}
+[nuimo-mqtt host]                            [weave (-engine)]           [roon-hub host]
+  nuimo-mqtt binary                           mosquitto
+   ├ nuimo                                     ↑
+   └ MQTT client   ──►  device/nuimo/{id}/input/{primitive}
+                                               │
+                   ◄──  device/nuimo/{id}/feedback/{type}
 ```
 
-**サービス → ルーター → デバイス (フィードバック)**:
+- 入力 primitive → `device/nuimo/{id}/input/{primitive}` に publish（QoS 0）
+- フィードバック: `device/nuimo/{id}/feedback/{type}` を subscribe、ペイロードから glyph を決定して LED 描画
+- `device/nuimo/{id}/state/{connected|battery|rssi}` を retained publish
+
+どちらを選ぶかの判断軸は `weave/SPEC.md` 参照。
+
+### イベント → InputPrimitive 対応（両経路で共通）
+
+| `NuimoEvent` | `InputPrimitive` / MQTT primitive |
+|---|---|
+| `ButtonDown` | `Press` / `press` |
+| `ButtonUp` | `Release` / `release` |
+| `Rotate { delta }` | `Rotate { delta }` / `rotate` (payload: `{"delta": f64}`) |
+| `SwipeUp`/`Down`/`Left`/`Right` | `Swipe { direction }` / `swipe_{up,down,left,right}` |
+| `TouchTop` 等 | `Touch { area }` / `touch_{top,bottom,left,right}` |
+| `LongTouch*` | `LongTouch { area }` / `long_touch_{...}` |
+| `FlyLeft`/`Right` | `Swipe { Left/Right }`（現状は吸収） |
+| `Hover { proximity }` | `Hover { proximity }` / `hover` |
+| `BatteryLevel(u8)` | state のみ |
+| `Rssi(i16)` | state のみ |
+
+### Crate 構成
+
 ```
-service/{type}/{target_id}/state/{property}
-  例: service/roon/16017ec9318.../state/playback    payload: "playing"
-      service/roon/16017ec9318.../state/volume      payload: 50
-
-device/{type}/{id}/feedback/{type}
-  例: device/nuimo/c381df4e/feedback/glyph       payload: {"glyph": "play", "brightness": 1.0}
-```
-
-### マッピング設定 (DB スキーマ)
-
-```json
-{
-  "mapping_id": "uuid",
-  "device_type": "nuimo",
-  "device_id": "C3:81:DF:4E:FF:6A",
-  "service_type": "roon",
-  "service_target": "16017ec93184841af2731e71ce1454ed0316",
-  "routes": [
-    {"input": "rotate", "intent": "volume_change", "params": {"damping": 80}},
-    {"input": "press", "intent": "playpause"},
-    {"input": "swipe_right", "intent": "next"},
-    {"input": "swipe_left", "intent": "previous"}
-  ],
-  "feedback": [
-    {"state": "playback", "feedback_type": "glyph", "mapping": {"playing": "play", "paused": "pause"}},
-    {"state": "volume", "feedback_type": "glyph", "mapping": "volume_bar"}
-  ],
-  "active": true
-}
+nuimo-rs/
+├ crates/
+│   ├ nuimo/               ← SDK。BLE + Glyph + Event。MQTT 非依存
+│   └ nuimo-mqtt/          ← 経路 B の device-side binary
+└ SPEC.md (本ドキュメント)
 ```
 
-`device_id` と `service_target` はそれぞれのシステムが発行する固有 ID をそのまま使用する（Nuimo = BLE address、Roon = zone_id/output_id、Hue = group ID 等）。Web UI ではこれらに human-readable な display_name を併記する。
-
-### 実装構成
-
-- **nu-router** (Rust binary): MQTT ルーティングエンジン + REST API (axum)。nuimo-rs workspace に追加
-- **nu-router-web** (Next.js): Web UI。マッピング設定、デバイス/サービス状態表示、ターゲット切替。REST API を呼ぶ
-- **DB**: DynamoDB (既存インフラ活用)
-- **REST API endpoints**:
-  - `GET /api/mappings` — 全マッピング一覧
-  - `POST /api/mappings` — マッピング作成
-  - `PUT /api/mappings/{id}` — マッピング更新
-  - `DELETE /api/mappings/{id}` — マッピング削除
-  - `POST /api/mappings/{id}/target` — アクティブターゲット切替
-  - `GET /api/devices` — 接続中デバイス一覧
-  - `GET /api/services` — 利用可能サービス一覧
-- **MCP tools** (Should): REST API のラッパー
+edge-agent 側は `nuimo` のみに依存する（`nuimo-mqtt` は使わない）。
 
 ## Edge Cases
 
 | ケース | 動作 |
 |---|---|
-| デバイス BLE 切断 | ルーターはマッピングを保持。デバイス再接続時に自動復帰。切断中のコマンドはドロップ |
-| サービス不在 | MQTT publish は fire-and-forget。サービスが復帰すれば自動的に繋がる |
-| マッピング変更中の操作 | 新マッピングは即時適用。処理中のイベントは旧マッピングで完了 |
-| 同一入力→複数サービス | routes 配列に複数エントリ。順次 publish |
-| レイテンシ劣化 | MQTT は QoS 0 (AtMostOnce) を使用し遅延最小化。volume は特にスロットリングなし |
+| Nuimo 範囲外 / 電源 OFF | `Disconnected` イベント、以降の `display_glyph` はエラー |
+| 再ペアリング | D-Bus adapter 経由で自動、ユーザー操作不要 |
+| 複数 Nuimo | 別 `NuimoDevice::new(addr)` で独立購読 |
+| MQTT broker 不在（経路 B） | nuimo-mqtt は接続リトライ、BLE イベントはロスト |
+| glyph 命名衝突 | weave の glyph registry は name が PK。衝突は上書き |
 
 ## Acceptance Criteria
 
-1. Nuimo の rotate が Roon の volume_change として届く（< 100ms）
-2. MCP tool で `switch_target` を呼ぶと、同じ Nuimo が別の zone を操作する
-3. マッピング設定を DB に保存し、ルーター再起動後に復帰する
-4. Roon の再生状態が変わると Nuimo に LED フィードバックが表示される
-5. 設定変更にコードの変更やリビルドが不要
+1. Nuimo を 1 台接続して全イベント種別が emit される（examples/connect_test.rs で確認可能）
+2. 9x9 ASCII から LED 描画が正しく出る
+3. 切断 → 再接続で notification が自動再購読される
+4. edge-agent 経由で Nuimo rotate が Roon Living zone の volume を変える（<100ms）
+5. nuimo-mqtt 経由で `device/nuimo/{id}/input/rotate` に publish が出る
