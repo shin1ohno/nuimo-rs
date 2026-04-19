@@ -2,6 +2,13 @@
 name = "nuimo"
 version = "0.1.0"
 edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Rust SDK for Senic Nuimo Control BLE smart knob — discovery, rotation, touch, swipe, and LED matrix"
+repository = "https://github.com/shin1ohno/nuimo-rs"
+homepage = "https://github.com/shin1ohno/nuimo-rs"
+keywords = ["nuimo", "ble", "bluetooth", "sdk", "senic"]
+categories = ["hardware-support", "api-bindings"]
+readme = "../../README.md"
 
 [dependencies]
 thiserror = { workspace = true }
