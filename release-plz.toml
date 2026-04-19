@@ -1,0 +1,11 @@
+[workspace]
+changelog_update = true
+pr_branch_prefix = "release-plz/"
+
+[[package]]
+name = "nuimo"
+publish = true
+
+[[package]]
+name = "nuimo-mqtt"
+publish = false
