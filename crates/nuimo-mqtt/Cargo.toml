@@ -12,6 +12,4 @@ serde_json = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
-# Pulls the Glyph type + related contract so nuimo-mqtt can consume
-# retained `system/glyphs/{name}` publishes from weave-server.
-weave-contracts = { path = "../../../edge-agent/crates/weave-contracts" }
+weave-contracts = "0.1"
