@@ -6,7 +6,6 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use bluer::Address;
 use nuimo::{
     discover, DisplayOptions, DisplayTransition, Glyph, NuimoDevice, NuimoEvent, RotationMode,
 };
@@ -185,10 +184,10 @@ async fn main() -> anyhow::Result<()> {
     let (mut rx, _discovery_handle) = discover().await?;
 
     // Track which devices have an active connection task
-    let active: Arc<Mutex<HashSet<Address>>> = Arc::new(Mutex::new(HashSet::new()));
+    let active: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
 
     while let Some(discovered) = rx.recv().await {
-        let addr = discovered.address;
+        let addr = discovered.address.clone();
 
         {
             let guard = active.lock().await;
@@ -196,11 +195,11 @@ async fn main() -> anyhow::Result<()> {
                 continue;
             }
         }
-        active.lock().await.insert(addr);
+        active.lock().await.insert(addr.clone());
 
         println!("Found: {} ({})", discovered.name, addr);
 
-        let device = Arc::new(NuimoDevice::new(addr, &discovered.adapter));
+        let device = Arc::new(NuimoDevice::new(addr.clone(), &discovered.adapter));
         let device_clone = device.clone();
         let active_clone = active.clone();
 

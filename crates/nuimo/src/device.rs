@@ -1,14 +1,11 @@
 use std::sync::Arc;
 
-use bluer::Adapter;
-use bluer::Address;
 use tokio::sync::{broadcast, mpsc, Mutex};
 
+use crate::backend::NuimoPeripheral;
 use crate::error::NuimoError;
 use crate::event::NuimoEvent;
-use crate::gatt;
 use crate::glyph::{DisplayOptions, Glyph};
-use crate::peripheral::NuimoPeripheral;
 
 /// Rotation mode for the dial.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -19,10 +16,12 @@ pub enum RotationMode {
     Continuous,
 }
 
-/// High-level interface to a Nuimo device.
+/// High-level interface to a Nuimo device. Platform details live in
+/// `crate::backend::NuimoPeripheral`; this struct stays identical across
+/// backends.
 pub struct NuimoDevice {
-    address: Address,
-    adapter_name: String,
+    id: String,
+    adapter_hint: Option<String>,
     peripheral: Arc<Mutex<Option<NuimoPeripheral>>>,
     event_tx: broadcast::Sender<NuimoEvent>,
     rotation_mode: Arc<Mutex<RotationMode>>,
@@ -51,11 +50,22 @@ impl Default for RotationState {
 
 impl NuimoDevice {
     /// Create a new device handle (not yet connected).
-    pub fn new(address: Address, adapter_name: &str) -> Self {
+    ///
+    /// `id` is the string form of the discovered device: a BLE MAC
+    /// (Linux) or a CoreBluetooth UUID (macOS). `adapter_hint` names
+    /// a specific host adapter when multiple are present — pass the
+    /// `adapter` field from `DiscoveredNuimo` as-is, or an empty string
+    /// to let the backend pick the default.
+    pub fn new(id: impl Into<String>, adapter_hint: &str) -> Self {
         let (event_tx, _) = broadcast::channel(64);
+        let hint = if adapter_hint.is_empty() {
+            None
+        } else {
+            Some(adapter_hint.to_string())
+        };
         Self {
-            address,
-            adapter_name: adapter_name.to_string(),
+            id: id.into(),
+            adapter_hint: hint,
             peripheral: Arc::new(Mutex::new(None)),
             event_tx,
             rotation_mode: Arc::new(Mutex::new(RotationMode::Continuous)),
@@ -67,18 +77,11 @@ impl NuimoDevice {
 
     /// Connect to the Nuimo device.
     pub async fn connect(&self) -> Result<(), NuimoError> {
-        let session = bluer::Session::new()
-            .await
-            .map_err(|e| NuimoError::Ble(e.to_string()))?;
-        let adapter = session
-            .adapter(&self.adapter_name)
-            .map_err(|e| NuimoError::Ble(e.to_string()))?;
-
         let (raw_tx, mut raw_rx) = mpsc::channel::<NuimoEvent>(64);
-        let periph = NuimoPeripheral::connect(session, &adapter, self.address, raw_tx).await?;
+        let periph =
+            NuimoPeripheral::connect(&self.id, self.adapter_hint.as_deref(), raw_tx).await?;
         *self.peripheral.lock().await = Some(periph);
 
-        // Forward raw events with rotation processing
         let event_tx = self.event_tx.clone();
         let rotation_mode = self.rotation_mode.clone();
         let rotation_state = self.rotation_state.clone();
@@ -91,22 +94,13 @@ impl NuimoDevice {
                     NuimoEvent::Rotate { delta, .. } => {
                         let mode = *rotation_mode.lock().await;
                         match mode {
-                            RotationMode::Continuous => {
-                                NuimoEvent::Rotate {
-                                    delta,
-                                    rotation: 0.0,
-                                }
-                            }
+                            RotationMode::Continuous => NuimoEvent::Rotate { delta, rotation: 0.0 },
                             RotationMode::Clamped => {
                                 let mut state = rotation_state.lock().await;
                                 let range = state.max - state.min;
                                 let cycle_delta = delta * range / state.cycles;
-                                state.value = (state.value + cycle_delta)
-                                    .clamp(state.min, state.max);
-                                NuimoEvent::Rotate {
-                                    delta,
-                                    rotation: state.value,
-                                }
+                                state.value = (state.value + cycle_delta).clamp(state.min, state.max);
+                                NuimoEvent::Rotate { delta, rotation: state.value }
                             }
                         }
                     }
@@ -120,8 +114,7 @@ impl NuimoDevice {
                     }
                     other => other,
                 };
-                // Ignore send errors — no active subscribers is normal
-                // (e.g., events() not yet called). The task must stay alive.
+                // Ignore send errors — no active subscribers is normal.
                 let _ = event_tx.send(processed);
             }
         });
@@ -146,14 +139,9 @@ impl NuimoDevice {
         }
     }
 
-    /// Device BLE address.
-    pub fn address(&self) -> Address {
-        self.address
-    }
-
-    /// Device ID string.
+    /// Device ID (BLE MAC on Linux, peripheral UUID on macOS).
     pub fn id(&self) -> String {
-        self.address.to_string()
+        self.id.clone()
     }
 
     /// Subscribe to device events.
@@ -190,11 +178,15 @@ impl NuimoDevice {
     /// Clear the display.
     pub async fn clear_display(&self) -> Result<(), NuimoError> {
         let empty = Glyph::empty();
-        self.display_glyph(&empty, &DisplayOptions {
-            brightness: 0.0,
-            timeout_ms: 0,
-            ..Default::default()
-        }).await
+        self.display_glyph(
+            &empty,
+            &DisplayOptions {
+                brightness: 0.0,
+                timeout_ms: 0,
+                ..Default::default()
+            },
+        )
+        .await
     }
 
     /// Set rotation mode.
