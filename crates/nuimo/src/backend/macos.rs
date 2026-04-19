@@ -69,9 +69,7 @@ pub async fn discover(
         }
 
         while let Some(event) = events.next().await {
-            if let CentralEvent::DeviceDiscovered(id)
-            | CentralEvent::DeviceUpdated(id) = event
-            {
+            if let CentralEvent::DeviceDiscovered(id) | CentralEvent::DeviceUpdated(id) = event {
                 if let Ok(p) = central.peripheral(&id).await {
                     report_if_nuimo(&central, &p, &adapter_name, &tx).await;
                 }
@@ -189,9 +187,15 @@ impl NuimoPeripheral {
         }
 
         // Subscribe to every notify characteristic.
-        for ch in [&battery_char, &button_char, &rotation_char, &touch_char, &fly_char]
-            .iter()
-            .filter_map(|c| c.as_ref())
+        for ch in [
+            &battery_char,
+            &button_char,
+            &rotation_char,
+            &touch_char,
+            &fly_char,
+        ]
+        .iter()
+        .filter_map(|c| c.as_ref())
         {
             if let Err(e) = peripheral.subscribe(ch).await {
                 tracing::warn!(uuid = %ch.uuid, error = %e, "subscribe failed");
@@ -227,7 +231,10 @@ impl NuimoPeripheral {
                 } else if n.uuid == rotation_uuid && data.len() >= 2 {
                     let raw = i16::from_le_bytes([data[0], data[1]]);
                     let delta = raw as f64 / gatt::ROTATION_POINTS_PER_CYCLE;
-                    Some(NuimoEvent::Rotate { delta, rotation: 0.0 })
+                    Some(NuimoEvent::Rotate {
+                        delta,
+                        rotation: 0.0,
+                    })
                 } else if n.uuid == touch_uuid && !data.is_empty() {
                     parse_touch_or_swipe(data[0])
                 } else if n.uuid == fly_uuid {
@@ -291,7 +298,10 @@ impl NuimoPeripheral {
     }
 }
 
-fn find_char(chars: &std::collections::BTreeSet<Characteristic>, uuid: Uuid) -> Option<Characteristic> {
+fn find_char(
+    chars: &std::collections::BTreeSet<Characteristic>,
+    uuid: Uuid,
+) -> Option<Characteristic> {
     chars.iter().find(|c| c.uuid == uuid).cloned()
 }
 
