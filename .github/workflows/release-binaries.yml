@@ -1,0 +1,62 @@
+name: Release binaries
+
+on:
+  push:
+    tags:
+      - 'nuimo-mqtt-v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            archive_suffix: linux-x86_64
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            archive_suffix: macos-aarch64
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+      - name: Install Linux BLE deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libdbus-1-dev pkg-config
+
+      - name: Build release binary
+        run: cargo build --release --package nuimo-mqtt --target ${{ matrix.target }}
+
+      - name: Package
+        id: package
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          name="nuimo-mqtt-${tag#nuimo-mqtt-v}-${{ matrix.archive_suffix }}"
+          mkdir -p "dist/${name}"
+          cp "target/${{ matrix.target }}/release/nuimo-mqtt" "dist/${name}/"
+          cp LICENSE-MIT LICENSE-APACHE README.md "dist/${name}/"
+          tar -czf "dist/${name}.tar.gz" -C dist "${name}"
+          (cd dist && shasum -a 256 "${name}.tar.gz" > "${name}.tar.gz.sha256")
+          echo "archive=dist/${name}.tar.gz" >> "$GITHUB_OUTPUT"
+          echo "sha256=dist/${name}.tar.gz.sha256" >> "$GITHUB_OUTPUT"
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: |
+            ${{ steps.package.outputs.archive }}
+            ${{ steps.package.outputs.sha256 }}
+          fail_on_unmatched_files: true

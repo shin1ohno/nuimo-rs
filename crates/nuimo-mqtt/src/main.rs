@@ -82,8 +82,7 @@ async fn main() -> anyhow::Result<()> {
             }
             // Battery and RSSI would be read from device if connected
             // For now, publish placeholder
-            let _ =
-                mqtt::publish_rssi(&heartbeat_client, &heartbeat_device_id, -50).await;
+            let _ = mqtt::publish_rssi(&heartbeat_client, &heartbeat_device_id, -50).await;
         }
     });
 

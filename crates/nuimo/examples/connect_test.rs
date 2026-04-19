@@ -91,17 +91,24 @@ fn glyph_volume(pct: u8) -> Glyph {
         } else {
             s.push_str("         ");
         }
-        if row < 8 { s.push('\n'); }
+        if row < 8 {
+            s.push('\n');
+        }
     }
     Glyph::from_str(&s)
 }
 
 async fn show(device: &NuimoDevice, glyph: &Glyph, timeout_ms: u32) {
-    let _ = device.display_glyph(glyph, &DisplayOptions {
-        brightness: 1.0,
-        timeout_ms,
-        transition: DisplayTransition::Immediate,
-    }).await;
+    let _ = device
+        .display_glyph(
+            glyph,
+            &DisplayOptions {
+                brightness: 1.0,
+                timeout_ms,
+                transition: DisplayTransition::Immediate,
+            },
+        )
+        .await;
 }
 
 async fn handle_device(device: Arc<NuimoDevice>) {
@@ -123,54 +130,52 @@ async fn handle_device(device: Arc<NuimoDevice>) {
 
     loop {
         match events.recv().await {
-            Ok(event) => {
-                match &event {
-                    NuimoEvent::ButtonDown => {
-                        println!("[{}] Button DOWN", id);
-                        show(&device, &glyph_play(), 1500).await;
-                    }
-                    NuimoEvent::ButtonUp => {
-                        println!("[{}] Button UP", id);
-                        show(&device, &glyph_pause(), 1500).await;
-                    }
-                    NuimoEvent::Rotate { delta, .. } => {
-                        volume_pct = (volume_pct + delta * 100.0).clamp(0.0, 100.0);
-                        let pct = volume_pct as u8;
-                        println!("[{}] Rotate: delta={:.3} volume={}%", id, delta, pct);
-                        show(&device, &glyph_volume(pct), 1000).await;
-                    }
-                    NuimoEvent::SwipeRight => {
-                        println!("[{}] Swipe RIGHT", id);
-                        show(&device, &glyph_right(), 1000).await;
-                    }
-                    NuimoEvent::SwipeLeft => {
-                        println!("[{}] Swipe LEFT", id);
-                        show(&device, &glyph_left(), 1000).await;
-                    }
-                    NuimoEvent::SwipeUp => println!("[{}] Swipe UP", id),
-                    NuimoEvent::SwipeDown => println!("[{}] Swipe DOWN", id),
-                    NuimoEvent::TouchTop => println!("[{}] Touch TOP", id),
-                    NuimoEvent::TouchBottom => println!("[{}] Touch BOTTOM", id),
-                    NuimoEvent::TouchLeft => println!("[{}] Touch LEFT", id),
-                    NuimoEvent::TouchRight => println!("[{}] Touch RIGHT", id),
-                    NuimoEvent::LongTouchLeft => println!("[{}] Long Touch LEFT", id),
-                    NuimoEvent::LongTouchRight => println!("[{}] Long Touch RIGHT", id),
-                    NuimoEvent::LongTouchBottom => println!("[{}] Long Touch BOTTOM", id),
-                    NuimoEvent::LongTouchTop => println!("[{}] Long Touch TOP", id),
-                    NuimoEvent::Hover { proximity } => {
-                        println!("[{}] Hover: proximity={:.2}", id, proximity);
-                    }
-                    NuimoEvent::FlyLeft => println!("[{}] Fly LEFT", id),
-                    NuimoEvent::FlyRight => println!("[{}] Fly RIGHT", id),
-                    NuimoEvent::BatteryLevel(level) => println!("[{}] Battery: {}%", id, level),
-                    NuimoEvent::Rssi(rssi) => println!("[{}] RSSI: {} dBm", id, rssi),
-                    NuimoEvent::Connected => println!("[{}] Connected", id),
-                    NuimoEvent::Disconnected => {
-                        println!("[{}] Disconnected", id);
-                        return;
-                    }
+            Ok(event) => match &event {
+                NuimoEvent::ButtonDown => {
+                    println!("[{}] Button DOWN", id);
+                    show(&device, &glyph_play(), 1500).await;
                 }
-            }
+                NuimoEvent::ButtonUp => {
+                    println!("[{}] Button UP", id);
+                    show(&device, &glyph_pause(), 1500).await;
+                }
+                NuimoEvent::Rotate { delta, .. } => {
+                    volume_pct = (volume_pct + delta * 100.0).clamp(0.0, 100.0);
+                    let pct = volume_pct as u8;
+                    println!("[{}] Rotate: delta={:.3} volume={}%", id, delta, pct);
+                    show(&device, &glyph_volume(pct), 1000).await;
+                }
+                NuimoEvent::SwipeRight => {
+                    println!("[{}] Swipe RIGHT", id);
+                    show(&device, &glyph_right(), 1000).await;
+                }
+                NuimoEvent::SwipeLeft => {
+                    println!("[{}] Swipe LEFT", id);
+                    show(&device, &glyph_left(), 1000).await;
+                }
+                NuimoEvent::SwipeUp => println!("[{}] Swipe UP", id),
+                NuimoEvent::SwipeDown => println!("[{}] Swipe DOWN", id),
+                NuimoEvent::TouchTop => println!("[{}] Touch TOP", id),
+                NuimoEvent::TouchBottom => println!("[{}] Touch BOTTOM", id),
+                NuimoEvent::TouchLeft => println!("[{}] Touch LEFT", id),
+                NuimoEvent::TouchRight => println!("[{}] Touch RIGHT", id),
+                NuimoEvent::LongTouchLeft => println!("[{}] Long Touch LEFT", id),
+                NuimoEvent::LongTouchRight => println!("[{}] Long Touch RIGHT", id),
+                NuimoEvent::LongTouchBottom => println!("[{}] Long Touch BOTTOM", id),
+                NuimoEvent::LongTouchTop => println!("[{}] Long Touch TOP", id),
+                NuimoEvent::Hover { proximity } => {
+                    println!("[{}] Hover: proximity={:.2}", id, proximity);
+                }
+                NuimoEvent::FlyLeft => println!("[{}] Fly LEFT", id),
+                NuimoEvent::FlyRight => println!("[{}] Fly RIGHT", id),
+                NuimoEvent::BatteryLevel(level) => println!("[{}] Battery: {}%", id, level),
+                NuimoEvent::Rssi(rssi) => println!("[{}] RSSI: {} dBm", id, rssi),
+                NuimoEvent::Connected => println!("[{}] Connected", id),
+                NuimoEvent::Disconnected => {
+                    println!("[{}] Disconnected", id);
+                    return;
+                }
+            },
             Err(_) => return,
         }
     }

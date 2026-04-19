@@ -94,13 +94,20 @@ impl NuimoDevice {
                     NuimoEvent::Rotate { delta, .. } => {
                         let mode = *rotation_mode.lock().await;
                         match mode {
-                            RotationMode::Continuous => NuimoEvent::Rotate { delta, rotation: 0.0 },
+                            RotationMode::Continuous => NuimoEvent::Rotate {
+                                delta,
+                                rotation: 0.0,
+                            },
                             RotationMode::Clamped => {
                                 let mut state = rotation_state.lock().await;
                                 let range = state.max - state.min;
                                 let cycle_delta = delta * range / state.cycles;
-                                state.value = (state.value + cycle_delta).clamp(state.min, state.max);
-                                NuimoEvent::Rotate { delta, rotation: state.value }
+                                state.value =
+                                    (state.value + cycle_delta).clamp(state.min, state.max);
+                                NuimoEvent::Rotate {
+                                    delta,
+                                    rotation: state.value,
+                                }
                             }
                         }
                     }

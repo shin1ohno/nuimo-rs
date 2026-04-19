@@ -97,7 +97,12 @@ pub async fn publish_input(
 ) -> anyhow::Result<()> {
     let topic = format!("device/nuimo/{}/input/{}", device_id, primitive_name);
     client
-        .publish(&topic, QoS::AtMostOnce, false, serde_json::to_string(payload)?)
+        .publish(
+            &topic,
+            QoS::AtMostOnce,
+            false,
+            serde_json::to_string(payload)?,
+        )
         .await?;
     Ok(())
 }
@@ -116,11 +121,7 @@ pub async fn publish_battery(
 }
 
 /// Publish RSSI as device state.
-pub async fn publish_rssi(
-    client: &AsyncClient,
-    device_id: &str,
-    rssi: i16,
-) -> anyhow::Result<()> {
+pub async fn publish_rssi(client: &AsyncClient, device_id: &str, rssi: i16) -> anyhow::Result<()> {
     let topic = format!("device/nuimo/{}/state/rssi", device_id);
     client
         .publish(&topic, QoS::AtLeastOnce, false, rssi.to_string())
@@ -129,10 +130,7 @@ pub async fn publish_rssi(
 }
 
 /// Publish device connected event.
-pub async fn publish_connected(
-    client: &AsyncClient,
-    device_id: &str,
-) -> anyhow::Result<()> {
+pub async fn publish_connected(client: &AsyncClient, device_id: &str) -> anyhow::Result<()> {
     let topic = format!("device/nuimo/{}/state/connected", device_id);
     client
         .publish(&topic, QoS::AtLeastOnce, true, "true")

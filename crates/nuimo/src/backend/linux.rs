@@ -208,7 +208,10 @@ impl NuimoPeripheral {
                 .map_err(|e| NuimoError::Ble(e.to_string()))?;
 
             for char in chars {
-                let uuid = char.uuid().await.map_err(|e| NuimoError::Ble(e.to_string()))?;
+                let uuid = char
+                    .uuid()
+                    .await
+                    .map_err(|e| NuimoError::Ble(e.to_string()))?;
                 tracing::debug!("  Characteristic: {}", uuid);
                 match uuid {
                     u if u == gatt::LED_MATRIX => led_char = Some(char),
@@ -276,7 +279,10 @@ impl NuimoPeripheral {
                 if data.len() >= 2 {
                     let raw = i16::from_le_bytes([data[0], data[1]]);
                     let delta = raw as f64 / gatt::ROTATION_POINTS_PER_CYCLE;
-                    Some(NuimoEvent::Rotate { delta, rotation: 0.0 })
+                    Some(NuimoEvent::Rotate {
+                        delta,
+                        rotation: 0.0,
+                    })
                 } else {
                     None
                 }
@@ -340,7 +346,11 @@ where
         tracing::info!("Subscribing to notifications (IO) for {}", uuid);
         match char.notify_io().await {
             Ok(reader) => {
-                tracing::info!("Notification IO established for {} (MTU={})", uuid, reader.mtu());
+                tracing::info!(
+                    "Notification IO established for {} (MTU={})",
+                    uuid,
+                    reader.mtu()
+                );
                 loop {
                     match reader.recv().await {
                         Ok(data) => {

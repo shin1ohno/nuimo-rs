@@ -40,6 +40,7 @@ impl Glyph {
     ///
     /// Each line represents a row (up to 9 lines). Use `*` for on, anything else for off.
     /// Lines are separated by newlines.
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Self {
         let mut rows = [0u16; LED_ROWS];
         for (row_idx, line) in s.lines().enumerate() {

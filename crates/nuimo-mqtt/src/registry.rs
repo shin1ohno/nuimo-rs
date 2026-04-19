@@ -69,7 +69,10 @@ mod tests {
     #[test]
     fn topic_to_name_matches_prefix() {
         assert_eq!(topic_to_name("system/glyphs/play"), Some("play"));
-        assert_eq!(topic_to_name("system/glyphs/volume_bar"), Some("volume_bar"));
+        assert_eq!(
+            topic_to_name("system/glyphs/volume_bar"),
+            Some("volume_bar")
+        );
         assert_eq!(topic_to_name("device/nuimo/x/feedback/y"), None);
     }
 }
