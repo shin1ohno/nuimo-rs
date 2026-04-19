@@ -2,6 +2,7 @@ use rumqttc::{AsyncClient, EventLoop, MqttOptions, QoS};
 use tokio::sync::mpsc;
 
 use crate::config::Config;
+use crate::registry::{topic_to_name, GlyphRegistry};
 
 /// MQTT bridge for Nuimo, using weave-compatible topic structure:
 ///   Publish: device/nuimo/{id}/input/{primitive}
@@ -45,11 +46,17 @@ impl MqttBridge {
     pub async fn start(
         mut self,
         device_id: &str,
+        glyphs: GlyphRegistry,
     ) -> anyhow::Result<(AsyncClient, mpsc::Receiver<(String, String)>)> {
-        // Subscribe to feedback from weave router
+        // Subscribe to feedback from the MQTT routing engine.
         let feedback_topic = format!("device/nuimo/{}/feedback/#", device_id);
         self.client
             .subscribe(&feedback_topic, QoS::AtLeastOnce)
+            .await?;
+        // Subscribe to the glyph registry so the initial retained publish
+        // populates the local cache before any feedback arrives.
+        self.client
+            .subscribe("system/glyphs/+", QoS::AtLeastOnce)
             .await?;
 
         let command_tx = self.command_tx.clone();
@@ -60,6 +67,10 @@ impl MqttBridge {
                 match self.event_loop.poll().await {
                     Ok(rumqttc::Event::Incoming(rumqttc::Packet::Publish(msg))) => {
                         let topic = msg.topic.clone();
+                        if let Some(name) = topic_to_name(&topic) {
+                            glyphs.apply(name, &msg.payload).await;
+                            continue;
+                        }
                         if let Ok(payload) = String::from_utf8(msg.payload.to_vec()) {
                             let _ = command_tx.send((topic, payload)).await;
                         }

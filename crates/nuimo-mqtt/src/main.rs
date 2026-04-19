@@ -1,6 +1,7 @@
 mod config;
 mod glyphs;
 mod mqtt;
+mod registry;
 
 use std::time::Duration;
 
@@ -8,6 +9,8 @@ use nuimo::{
     discover, DisplayOptions, DisplayTransition, Glyph, NuimoDevice, NuimoEvent, RotationMode,
 };
 use rumqttc::AsyncClient;
+
+use crate::registry::GlyphRegistry;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -48,7 +51,8 @@ async fn main() -> anyhow::Result<()> {
 
     // Connect MQTT
     let bridge = mqtt::MqttBridge::new(&config);
-    let (mqtt_client, mut reaction_rx) = bridge.start(&device_id).await?;
+    let glyph_registry = GlyphRegistry::new();
+    let (mqtt_client, mut reaction_rx) = bridge.start(&device_id, glyph_registry.clone()).await?;
     mqtt::publish_connected(&mqtt_client, &device_id).await?;
     tracing::info!("MQTT connected");
 
@@ -95,7 +99,7 @@ async fn main() -> anyhow::Result<()> {
             // MQTT → Nuimo (reactions)
             Some((topic, payload)) = reaction_rx.recv() => {
                 *heartbeat_active.lock().await = true;
-                handle_mqtt_reaction(&device, &device_id, &topic, &payload).await;
+                handle_mqtt_reaction(&device, &device_id, &topic, &payload, &glyph_registry).await;
             }
         }
     }
@@ -142,6 +146,7 @@ async fn handle_mqtt_reaction(
     _device_id: &str,
     _topic: &str,
     payload: &str,
+    registry: &GlyphRegistry,
 ) {
     let body: serde_json::Value = match serde_json::from_str(payload) {
         Ok(v) => v,
@@ -158,13 +163,36 @@ async fn handle_mqtt_reaction(
         .or_else(|| body["percentage"].as_u64().map(|v| v as u8))
         .unwrap_or(0);
 
-    let glyph = match status {
-        "playing" => glyphs::play(),
-        "paused" => glyphs::pause(),
-        "next" => glyphs::next(),
-        "previous" => glyphs::previous(),
-        "volumeChange" => glyphs::volume(percentage),
-        _ => glyphs::empty(),
+    // Map status string → weave glyph name. volume/volumeChange is
+    // rendered by the local parametric helper (matches the `volume_bar`
+    // builtin on the server).
+    let glyph_name = match status {
+        "playing" => Some("play"),
+        "paused" => Some("pause"),
+        "next" => Some("next"),
+        "previous" => Some("previous"),
+        _ => None,
+    };
+
+    let glyph = if status == "volumeChange" {
+        glyphs::volume(percentage)
+    } else if let Some(name) = glyph_name {
+        match registry.get(name).await {
+            Some(entry) if !entry.builtin => Glyph::from_str(&entry.pattern),
+            Some(_) => {
+                tracing::debug!(name, "skipping builtin glyph (rendered locally)");
+                return;
+            }
+            None => {
+                tracing::debug!(
+                    name,
+                    "glyph not in registry yet; feedback suppressed until retained publish arrives"
+                );
+                return;
+            }
+        }
+    } else {
+        glyphs::empty()
     };
 
     let transition = if status == "volumeChange" {

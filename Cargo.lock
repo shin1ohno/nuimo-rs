@@ -536,6 +536,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "weave-contracts",
 ]
 
 [[package]]
@@ -1254,6 +1255,15 @@ dependencies = [
  "hashbrown 0.15.5",
  "indexmap",
  "semver",
+]
+
+[[package]]
+name = "weave-contracts"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "uuid",
 ]
 
 [[package]]

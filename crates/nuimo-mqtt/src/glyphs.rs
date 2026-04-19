@@ -1,74 +1,12 @@
+//! Local glyphs kept inside nuimo-mqtt.
+//!
+//! Named patterns (play, pause, next, previous, ...) now come from the
+//! weave-server glyph registry via `system/glyphs/{name}` retained MQTT
+//! messages — see `registry.rs`. Only the glyphs needed before the
+//! registry is hydrated (link on connect) or for parametric rendering
+//! (volume bar) remain baked in here.
+
 use nuimo::Glyph;
-
-pub fn play() -> Glyph {
-    Glyph::from_str(
-        "    *    \n\
-         **   \n\
-         ***  \n\
-         **** \n\
-         *****\n\
-         **** \n\
-         ***  \n\
-         **   \n\
-         *    ",
-    )
-}
-
-pub fn pause() -> Glyph {
-    Glyph::from_str(
-        "  **  ** \n\
-           **  ** \n\
-           **  ** \n\
-           **  ** \n\
-           **  ** \n\
-           **  ** \n\
-           **  ** \n\
-           **  ** \n\
-           **  ** ",
-    )
-}
-
-pub fn stop() -> Glyph {
-    Glyph::from_str(
-        " ******* \n\
-           ******* \n\
-           ******* \n\
-           ******* \n\
-           ******* \n\
-           ******* \n\
-           ******* \n\
-           ******* \n\
-           ******* ",
-    )
-}
-
-pub fn next() -> Glyph {
-    Glyph::from_str(
-        "  *   *  \n\
-           **  **  \n\
-           *** *** \n\
-           ********\n\
-           ********\n\
-           ********\n\
-           *** *** \n\
-           **  **  \n\
-           *   *  ",
-    )
-}
-
-pub fn previous() -> Glyph {
-    Glyph::from_str(
-        "  *   *  \n\
-           **  **  \n\
-          *** *** \n\
-         ********\n\
-         ********\n\
-         ********\n\
-          *** *** \n\
-           **  **  \n\
-           *   *  ",
-    )
-}
 
 pub fn link() -> Glyph {
     Glyph::from_str(
@@ -88,7 +26,7 @@ pub fn empty() -> Glyph {
     Glyph::empty()
 }
 
-/// Volume bar glyph (0-100%).
+/// Volume bar glyph (0-100%). Matches the weave `volume_bar` builtin.
 pub fn volume(percentage: u8) -> Glyph {
     let bars = ((percentage as f64 / 100.0) * 9.0).round() as usize;
     let mut rows = String::new();
