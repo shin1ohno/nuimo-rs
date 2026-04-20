@@ -15,12 +15,40 @@ use btleplug::api::{
 };
 use btleplug::platform::{Adapter, Manager, Peripheral, PeripheralId};
 use futures::StreamExt;
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{mpsc, Mutex, OnceCell};
 use uuid::Uuid;
 
 use crate::error::NuimoError;
 use crate::event::{parse_fly, parse_touch_or_swipe, NuimoEvent};
 use crate::gatt;
+
+// On macOS, CoreBluetooth keys peripherals to the CBCentralManager that
+// discovered them: a fresh `Manager::new()` has an empty peripheral cache,
+// so retrieving the discovered peripheral by UUID fails with "Device not
+// found". Sharing a single process-wide Adapter between `discover()` and
+// `NuimoPeripheral::connect()` lets connect use the same CoreBluetooth
+// cache the scan populated.
+static SHARED_ADAPTER: OnceCell<Arc<Adapter>> = OnceCell::const_new();
+
+async fn shared_adapter() -> Result<Arc<Adapter>, NuimoError> {
+    SHARED_ADAPTER
+        .get_or_try_init(|| async {
+            let manager = Manager::new()
+                .await
+                .map_err(|e| NuimoError::Ble(e.to_string()))?;
+            let adapters = manager
+                .adapters()
+                .await
+                .map_err(|e| NuimoError::Ble(e.to_string()))?;
+            let adapter = adapters
+                .into_iter()
+                .next()
+                .ok_or_else(|| NuimoError::Ble("no Bluetooth adapter found".into()))?;
+            Ok(Arc::new(adapter))
+        })
+        .await
+        .cloned()
+}
 
 #[derive(Debug, Clone)]
 pub struct DiscoveredNuimo {
@@ -31,17 +59,7 @@ pub struct DiscoveredNuimo {
 
 pub async fn discover(
 ) -> Result<(mpsc::Receiver<DiscoveredNuimo>, tokio::task::JoinHandle<()>), NuimoError> {
-    let manager = Manager::new()
-        .await
-        .map_err(|e| NuimoError::Ble(e.to_string()))?;
-    let adapters = manager
-        .adapters()
-        .await
-        .map_err(|e| NuimoError::Ble(e.to_string()))?;
-    let central = adapters
-        .into_iter()
-        .next()
-        .ok_or_else(|| NuimoError::Ble("no Bluetooth adapter found".into()))?;
+    let central = shared_adapter().await?;
     let adapter_name = "default".to_string();
 
     central
@@ -126,19 +144,7 @@ impl NuimoPeripheral {
         _adapter_hint: Option<&str>,
         event_tx: mpsc::Sender<NuimoEvent>,
     ) -> Result<Self, NuimoError> {
-        let manager = Manager::new()
-            .await
-            .map_err(|e| NuimoError::Ble(e.to_string()))?;
-        let adapters = manager
-            .adapters()
-            .await
-            .map_err(|e| NuimoError::Ble(e.to_string()))?;
-        let central = Arc::new(
-            adapters
-                .into_iter()
-                .next()
-                .ok_or_else(|| NuimoError::Ble("no Bluetooth adapter found".into()))?,
-        );
+        let central = shared_adapter().await?;
 
         let peripheral_id = parse_peripheral_id(id)?;
         let peripheral = central
