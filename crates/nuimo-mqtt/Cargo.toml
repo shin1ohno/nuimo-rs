@@ -6,7 +6,7 @@ edition = "2021"
 [dependencies]
 anyhow = "1"
 nuimo = { path = "../nuimo", version = "0.1" }
-rumqttc = "0.24"
+rumqttc = "0.25"
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
