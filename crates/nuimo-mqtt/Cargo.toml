@@ -6,7 +6,14 @@ edition = "2021"
 [dependencies]
 anyhow = "1"
 nuimo = { path = "../nuimo", version = "0.1" }
-rumqttc = "0.24"
+# default-features = false disables rumqttc's `use-rustls` feature. This crate
+# only connects to a plaintext broker (mqtt://…, no set_transport(Tls)), so the
+# rustls/webpki TLS stack it would otherwise pull is unused dead weight — and its
+# rustls-webpki 0.102.8 pin carries 4 unfixable RUSTSEC advisories (webpki fixes
+# ship only in 0.103.x, which rumqttc does not allow). Dropping the feature
+# removes the entire TLS tree and clears RUSTSEC-2026-0049/0098/0099/0104 +
+# the rustls-pemfile unmaintained warning. Re-enable use-rustls if TLS is needed.
+rumqttc = { version = "0.24", default-features = false }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
