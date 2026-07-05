@@ -19,4 +19,4 @@ serde_json = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
-weave-contracts = "0.5"
+weave-contracts = "0.16"
