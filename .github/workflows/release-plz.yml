@@ -4,27 +4,36 @@ on:
   push:
     branches: [main]
 
-permissions:
-  contents: write
-  pull-requests: write
+permissions: {}
 
 jobs:
   release-plz-release:
     name: Release-plz release
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      # Push tags and create releases.
+      contents: write
+      # Detect the release PR and its commits.
+      pull-requests: read
     concurrency:
       group: release-plz-release
     steps:
-      - uses: actions/checkout@v7
+      # release-plz pushes and releases through the GitHub API, so the
+      # checkout credential is not kept.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - uses: dtolnay/rust-toolchain@stable
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+        with:
+          toolchain: stable
       - name: Install Linux BLE deps
         run: |
           sudo apt-get update
           sudo apt-get install -y libdbus-1-dev pkg-config
       - name: Run release-plz
-        uses: MarcoIeni/release-plz-action@v0.5.130
+        uses: release-plz/action@e8792575c7f2366cf6ff3ccc33ead9ace5b691c7 # v0.5.130
         with:
           command: release
         env:
@@ -35,20 +44,27 @@ jobs:
     name: Release-plz PR
     needs: release-plz-release
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
     concurrency:
       group: release-plz-pr
       cancel-in-progress: false
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - uses: dtolnay/rust-toolchain@stable
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+        with:
+          toolchain: stable
       - name: Install Linux BLE deps
         run: |
           sudo apt-get update
           sudo apt-get install -y libdbus-1-dev pkg-config
       - name: Run release-plz
-        uses: MarcoIeni/release-plz-action@v0.5.130
+        uses: release-plz/action@e8792575c7f2366cf6ff3ccc33ead9ace5b691c7 # v0.5.130
         with:
           command: release-pr
         env:
