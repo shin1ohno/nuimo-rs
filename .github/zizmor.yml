@@ -1,0 +1,6 @@
+rules:
+  # softprops/action-gh-release is kept for the release upload for now;
+  # replacing it with `gh release` in run: is a separate change.
+  superfluous-actions:
+    ignore:
+      - release-binaries.yml
